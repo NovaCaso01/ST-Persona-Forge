@@ -1,0 +1,13 @@
+{
+    "display_name": "페르소나 대장간",
+    "loading_order": 100,
+    "requires": [],
+    "optional": [],
+    "js": "index.js",
+    "css": "style.css",
+    "author": "NovaCaso01",
+    "version": "1.0.0",
+    "description": "챗봇에 어울리는 {{user}} 페르소나 프로필을 빠르고 쉽게 생성하는 확장 프로그램. 캐릭터 디스크립션과 월드인포를 기반으로 자동 생성, 섹션별 재생성, 다국어 번역 지원.",
+    "homePage": "",
+    "auto_update": true
+}
