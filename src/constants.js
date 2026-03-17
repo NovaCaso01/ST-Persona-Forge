@@ -45,8 +45,8 @@ export const PROFILE_FIELDS = {
         id: 'basics',
         label: '기본 정보',
         labelEn: 'BASICS',
-        description: 'Name, Age, Sex, Birthday, Occupation, Current Residence',
-        descriptionKo: '이름, 나이, 성별, 생일, 직업, 현 거주지',
+        description: 'Name, Age, Sex, Race, Birthday, Occupation, Current Residence',
+        descriptionKo: '이름, 나이, 성별, 종족, 생일, 직업, 현 거주지',
         icon: 'fa-solid fa-id-card',
     },
     appearance: {
@@ -144,8 +144,8 @@ export const PROFILE_FIELDS = {
         id: 'character_notes',
         label: '캐릭터 노트',
         labelEn: 'CHARACTER NOTES',
-        description: 'Additional miscellaneous notes',
-        descriptionKo: '추가 참고사항',
+        description: 'Additional notes, interesting facts about the characters, elements that may change as the story progresses, etc',
+        descriptionKo: '추가 참고사항, 캐릭터에 대한 흥미로운 사실, 스토리 진행 과정에서 변경될 수 있는 요소 등',
         icon: 'fa-solid fa-note-sticky',
     },
 };

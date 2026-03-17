@@ -30,8 +30,8 @@ function cleanExtensionTags(text) {
 
     // 일반적인 확장 관련 HTML 태그 패턴
     cleaned = cleaned.replace(/<\/?img[^>]*>/gi, '');
-    cleaned = cleaned.replace(/<audio[^>]*>[\s\S]*?<\/audio>/gi, '');
-    cleaned = cleaned.replace(/<video[^>]*>[\s\S]*?<\/video>/gi, '');
+    cleaned = cleaned.replace(/<status[^>]*>[\s\S]*?<\/status>/gi, '');
+    cleaned = cleaned.replace(/<choice[^>]*>[\s\S]*?<\/choice>/gi, '');
 
     // 연속 빈 줄 정리 (3줄 이상 → 2줄)
     cleaned = cleaned.replace(/\n{3,}/g, '\n\n');
@@ -57,8 +57,8 @@ function cleanGeneratedText(text) {
 
     // 기타 HTML 태그 (이미지/미디어 관련)
     cleaned = cleaned.replace(/<\/?img[^>]*>/gi, '');
-    cleaned = cleaned.replace(/<audio[^>]*>[\s\S]*?<\/audio>/gi, '');
-    cleaned = cleaned.replace(/<video[^>]*>[\s\S]*?<\/video>/gi, '');
+    cleaned = cleaned.replace(/<status[^>]*>[\s\S]*?<\/status>/gi, '');
+    cleaned = cleaned.replace(/<choice[^>]*>[\s\S]*?<\/choice>/gi, '');
 
     // ``` 코드블록으로 감싼 경우 제거 (가끔 LLM이 마크다운 코드블록으로 감쌈)
     cleaned = cleaned.replace(/^```[a-z]*\n?/gm, '');
@@ -220,17 +220,13 @@ export async function generatePersona(config = {}) {
             userPrompt += `\n\n## Instructions\nFill in the above profile sheet template to create a player character persona.
 - Follow the sheet template's structure, format, and categories EXACTLY
 - Do NOT change the template's formatting or add/remove sections
-- Fill in each field with creative, specific, concrete content appropriate for the target character's world
-- The player character must fit naturally into the target character's world and cultural context
 - Your output format must follow ONLY the sheet template above — do NOT borrow formatting from the target character data`;
 
             userPrompt += `\n\n## Language\nCRITICAL: ${langInfo.instruction} The ENTIRE profile must be written in this language only. Do NOT mix languages or fall back to any other language.`;
 
             userPrompt += `\n\n## Important Notes
 - The player character is NOT the target chatbot character — create a separate person
-- IGNORE any existing user persona/profile that may appear in the context
-- Do NOT reuse any names from the character data (including placeholders like "[Player Character]") — create a completely new, original name
-- The character's nationality/culture must match the target character's world, regardless of output language
+- Do NOT name the character "[Player Character]" — create an original name
 
 Begin filling in the profile sheet now.`;
 
@@ -244,14 +240,10 @@ Begin filling in the profile sheet now.`;
 
             userPrompt += `\n\n## Important Notes
 - The player character is NOT the target chatbot character — create a separate person
-- The persona should complement and create interesting dynamics with the target character
-- Be specific and concrete — avoid generic or vague descriptions
-- The character's nationality/culture must match the target character's world, regardless of output language
 - Each section should use ## as the header level
 - Use - bullet points before each field label (e.g. "- **Name:** Lily"), and use sub-bullets for multi-item lists
 - Your output format must follow ONLY the section structure specified above — do NOT borrow formatting, markup, or layout from the target character data
-- IGNORE any existing user persona/profile that may appear in the context — create a completely fresh, original persona from scratch
-- Do NOT reuse any names from the character data (including placeholders like "[Player Character]") — create a completely new, original name
+- Do NOT name the character "[Player Character]" — create an original name
 
 Begin writing the player character persona profile now.`;
         }
