@@ -85,13 +85,17 @@
                     <div class="pf-radio-group">
                         <label class="pf-radio-label">
                             <input type="radio" name="pf-gen-mode" value="free" checked>
-                            <span>자유 생성</span>
-                            <span class="pf-radio-desc">캐릭터 정보만 보고 AI가 자유롭게 생성</span>
+                            <div class="pf-radio-content">
+                                <span class="pf-radio-title">자유 생성</span>
+                                <span class="pf-radio-desc">캐릭터 정보만 보고 AI가 자유롭게 생성</span>
+                            </div>
                         </label>
                         <label class="pf-radio-label">
                             <input type="radio" name="pf-gen-mode" value="guided">
-                            <span>가이드 생성</span>
-                            <span class="pf-radio-desc">내가 원하는 컨셉을 입력하면 그에 맞게 생성</span>
+                            <div class="pf-radio-content">
+                                <span class="pf-radio-title">가이드 생성</span>
+                                <span class="pf-radio-desc">내가 원하는 컨셉을 입력하면 그에 맞게 생성</span>
+                            </div>
                         </label>
                     </div>
                     <div id="pf-guided-input" style="display: none;">
@@ -225,7 +229,7 @@
                     <!-- 전체 재생성 추가 지시 패널 -->
                     <div id="pf-regen-all-panel" class="pf-inline-panel" style="display: none;">
                         <textarea id="pf-regen-all-instructions" class="pf-textarea" rows="2"
-                            placeholder="추가 지시사항 (선택사항)... 비워두면 동일 설정으로 새로 생성합니다."></textarea>
+                            placeholder="추가 지시사항 (선택사항)... 해당 재생성 기능은 완전히 새로운 프로필을 생성하는 것입니다. 비워두면 동일 요청사항으로 새로 생성합니다."></textarea>
                         <div class="pf-inline-panel-actions">
                             <button id="pf-regen-all-go" class="pf-primary-btn pf-small-btn">재생성</button>
                             <button id="pf-regen-all-cancel" class="pf-btn pf-small-btn">취소</button>

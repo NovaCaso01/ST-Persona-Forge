@@ -19,6 +19,16 @@ import { generatePersona, regenerateSection, regenerateAll, translateProfile, up
 // ===== 편집 모드 상태 =====
 let isEditMode = false;
 
+// ===== 로딩 텍스트 로테이션 =====
+const LOADING_TEXTS = [
+    '페르소나를 대장간에서 벼려내는 중...',
+    '성격을 틀에 붓고 단단히 굳히는 중...',
+    '개성을 불꽃 속에서 단련하는 중...',
+    '설정 충돌을 용광로에 던지는 중...',
+];
+let loadingTextInterval = null;
+let loadingTextIndex = 0;
+
 // ===== 팝업 로드 및 초기화 =====
 
 /**
@@ -367,7 +377,7 @@ async function populateWIBookDropdown() {
 async function onWIBookSelect() {
     const selected = $('#pf-wi-book-select').val();
     const $list = $('#pf-wi-entry-list');
-    $list.html('<div class="pf-wi-empty">로딩 중...</div>');
+    $list.html('<div class="pf-wi-empty">재료를 수집하는 중...</div>');
 
     try {
         let entries;
@@ -402,7 +412,7 @@ async function loadAndDisplayWIEntries(charIndex) {
     // 캐릭터 연결 모드일 때만 자동 로드
     if (selectedBook && selectedBook !== '__char__') return;
 
-    $list.html('<div class="pf-wi-empty">로딩 중...</div>');
+    $list.html('<div class="pf-wi-empty">재료를 수집하는 중...</div>');
 
     try {
         const entries = await loadCharacterWorldInfo(charIndex);
@@ -652,7 +662,27 @@ async function onGenerateClick() {
     }
 }
 
-function showGenerateLoading(show) {
+function startLoadingTextRotation() {
+    stopLoadingTextRotation();
+    loadingTextIndex = 0;
+    const $text = $('#pf-gen-loading-text');
+    $text.text(LOADING_TEXTS[0]).removeClass('pf-loading-text-fade');
+    loadingTextInterval = setInterval(() => {
+        loadingTextIndex = (loadingTextIndex + 1) % LOADING_TEXTS.length;
+        $text.removeClass('pf-loading-text-fade');
+        void $text[0]?.offsetWidth;
+        $text.text(LOADING_TEXTS[loadingTextIndex]).addClass('pf-loading-text-fade');
+    }, 3500);
+}
+
+function stopLoadingTextRotation() {
+    if (loadingTextInterval) {
+        clearInterval(loadingTextInterval);
+        loadingTextInterval = null;
+    }
+}
+
+function showGenerateLoading(show, customText = null) {
     $('#pf-gen-loading').toggle(show);
     $('#pf-gen-empty').toggle(!show && !state.currentGeneration);
     $('#pf-gen-result').toggle(!show && !!state.currentGeneration);
@@ -662,6 +692,14 @@ function showGenerateLoading(show) {
         isEditMode = false;
         $('#pf-edit-area').hide();
         $('#pf-sections-container').show();
+        if (customText) {
+            stopLoadingTextRotation();
+            $('#pf-gen-loading-text').text(customText);
+        } else {
+            startLoadingTextRotation();
+        }
+    } else {
+        stopLoadingTextRotation();
     }
 }
 
@@ -692,6 +730,20 @@ function renderGenerationResult(data) {
     } else {
         renderSectionCards(data.sections);
     }
+
+    // 전체 수정 지시 블록 추가 (모든 모드 공통)
+    $('#pf-sections-container').append(`
+    <div class="pf-modify-section" style="margin-top: 10px;">
+        <button id="pf-modify-toggle-btn" class="pf-btn" style="width: 100%"><i class="fa-solid fa-pen-to-square"></i> 현재 생성된 프로필 기반 전체 수정 지시</button>
+        <div id="pf-modify-panel" class="pf-inline-panel" style="display: none; margin-top: 8px;">
+            <textarea id="pf-modify-instructions" class="pf-textarea" rows="3"
+                placeholder="수정할 내용을 자유롭게 입력하세요...&#10;예: 나머지는 그대로 두고 이름만 전부 A로 바꿔줘&#10;예: 성격을 좀 더 쿨하게 바꿔줘"></textarea>
+            <div class="pf-inline-panel-actions">
+                <button id="pf-modify-go" class="pf-primary-btn pf-small-btn">수정 실행</button>
+                <button id="pf-modify-cancel" class="pf-btn pf-small-btn">취소</button>
+            </div>
+        </div>
+    </div>`);
 
     // 편집 모드 리셋
     isEditMode = false;
@@ -732,7 +784,7 @@ function renderSectionCards(sections) {
             </div>
             <div class="pf-section-card-body${isEmpty ? ' empty' : ''}">${bodyContent}</div>
             <div class="pf-section-regen-panel" style="display: none;">
-                <textarea placeholder="추가 지시사항 (선택사항)...&#10;예: 좀 더 쿨한 성격으로, 키를 작게 변경해줘"></textarea>
+                <textarea placeholder="추가 지시사항 (선택사항)...&#10;예: 나머진 그대로 두고 키를 작게 변경해줘"></textarea>
                 <div class="pf-section-regen-actions">
                     <button class="pf-section-regen-go pf-primary-btn pf-small-btn" data-field="${fieldId}">재생성</button>
                     <button class="pf-section-regen-cancel pf-small-btn">취소</button>
@@ -743,7 +795,7 @@ function renderSectionCards(sections) {
 }
 
 /**
- * 커스텀 시트 모드 결과 렌더링 (단일 블록 + 수정 지시 버튼)
+ * 커스텀 시트 모드 결과 렌더링 (단일 블록)
  */
 function renderCustomResultBlock(fullText) {
     const $container = $('#pf-sections-container');
@@ -757,17 +809,6 @@ function renderCustomResultBlock(fullText) {
                 <span class="pf-section-label">CUSTOM PROFILE</span>
             </div>
             <div class="pf-section-card-body">${escapeHtml(fullText.trim())}</div>
-        </div>
-    </div>
-    <div class="pf-modify-section" style="margin-top: 10px;">
-        <button id="pf-modify-toggle-btn" class="pf-btn" style="width: 100%"><i class="fa-solid fa-pen-to-square"></i> 수정 지시</button>
-        <div id="pf-modify-panel" class="pf-inline-panel" style="display: none; margin-top: 8px;">
-            <textarea id="pf-modify-instructions" class="pf-textarea" rows="3"
-                placeholder="수정할 내용을 자유롭게 입력하세요...&#10;예: 이름을 순하게 바꿔줘&#10;예: 성격을 좀 더 쿨하게 바꿔줘&#10;예: NSFW 부분을 더 자극적으로"></textarea>
-            <div class="pf-inline-panel-actions">
-                <button id="pf-modify-go" class="pf-primary-btn pf-small-btn">수정 실행</button>
-                <button id="pf-modify-cancel" class="pf-small-btn">취소</button>
-            </div>
         </div>
     </div>`);
 }
@@ -784,8 +825,7 @@ async function onModifyClick() {
     }
 
     try {
-        showGenerateLoading(true);
-        $('#pf-gen-loading-text').text('프로필 수정 중...');
+        showGenerateLoading(true, '프로필을 모루 위에서 다듬는 중...');
         $('#pf-modify-panel').hide();
 
         const result = await modifyProfile(instructions);
@@ -796,7 +836,6 @@ async function onModifyClick() {
         logError('modify', error);
         showToast('error', `수정 실패: ${error.message}`);
         showGenerateLoading(false);
-        $('#pf-gen-loading-text').text('페르소나를 대장간에서 벼려내는 중...');
     }
 }
 
@@ -992,8 +1031,7 @@ async function onTranslateClick() {
     const targetLang = $('#pf-translate-lang').val();
 
     try {
-        showGenerateLoading(true);
-        $('#pf-gen-loading-text').text('번역 중...');
+        showGenerateLoading(true, '다른 언어의 주형에 부어넣는 중...');
         $('#pf-translate-panel').hide();
 
         const result = await translateProfile(targetLang);
@@ -1004,7 +1042,6 @@ async function onTranslateClick() {
         logError('translate', error);
         showToast('error', `번역 실패: ${error.message}`);
         showGenerateLoading(false);
-        $('#pf-gen-loading-text').text('페르소나를 대장간에서 벼려내는 중...');
     }
 }
 
