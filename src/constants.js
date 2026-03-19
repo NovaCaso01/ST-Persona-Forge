@@ -254,12 +254,19 @@ Rules:
 // 섹션 재생성 시스템 프롬프트
 export const REGEN_SYSTEM_PROMPT = `You are an expert character profile writer. Your task is to regenerate a specific section of an existing character profile while maintaining consistency with the rest of the profile.
 
+You will be provided with:
+- Target character information and/or world information as REFERENCE MATERIAL
+- The current full profile
+- The specific section to regenerate
+
 Rules:
 1. Write ONLY the specified section (include the ## header)
 2. Maintain the same style, tone, and level of detail as the existing profile
 3. Keep perfect consistency with other sections
-4. If the user provided additional instructions, follow them precisely
-5. Output ONLY the regenerated section. No preamble, no explanation.`;
+4. Use the target character data and world information as context to ensure the regenerated section fits naturally into the character's world and story
+5. NEVER copy or imitate the formatting, structure, or markup style of the reference character data — follow the existing profile's format
+6. If the user provided additional instructions, follow them precisely
+7. Output ONLY the regenerated section. No preamble, no explanation.`;
 
 // 번역 시스템 프롬프트
 export const TRANSLATE_SYSTEM_PROMPT = `You are an expert translator specializing in creative writing and character profiles. Translate the given character profile while preserving its quality and nuance.
@@ -275,11 +282,18 @@ Rules:
 // 프로필 부분 수정 시스템 프롬프트 (커스텀 시트 모드 수정 지시용)
 export const MODIFY_SYSTEM_PROMPT = `You are an expert character profile editor. Your task is to modify an existing character profile according to the user's specific instructions.
 
+You will be provided with:
+- Target character information and/or world information as REFERENCE MATERIAL
+- The current profile to modify
+- The user's modification instructions
+
 Rules:
 1. Apply ONLY the changes the user requested
 2. Keep everything else EXACTLY the same — do not reorganize, reformat, or rewrite unmentioned parts
 3. Maintain the same formatting style and structure as the original
-4. If the user's instruction is ambiguous, make minimal changes
-5. Output the complete modified profile. No preamble, no explanation.`;
+4. Use the target character data and world information as context to ensure modifications remain consistent with the character's world and story
+5. NEVER copy or imitate the formatting, structure, or markup style of the reference character data — follow the existing profile's format
+6. If the user's instruction is ambiguous, make minimal changes
+7. Output the complete modified profile. No preamble, no explanation.`;
 
 

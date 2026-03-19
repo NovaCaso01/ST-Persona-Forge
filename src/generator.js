@@ -337,6 +337,15 @@ export async function regenerateSection(sectionKey, additionalInstructions = '')
 
         let userPrompt = `## Target Character Information\n${formatCharacterData(charData)}`;
 
+        // 월드인포
+        const settings = getSettings();
+        if (settings.includeWorldInfo) {
+            const wiText = formatWorldInfoEntries();
+            if (wiText) {
+                userPrompt += `\n\n## World Information\n${wiText}`;
+            }
+        }
+
         userPrompt += `\n\n## Current Full Profile\n${state.currentGeneration.fullText}`;
 
         userPrompt += `\n\n## Section to Regenerate\n${section.header}`;
@@ -612,7 +621,25 @@ export async function modifyProfile(instructions) {
         const language = state.currentGeneration.language || 'en';
         const langInfo = LANGUAGES[language] || LANGUAGES.en;
 
-        let userPrompt = `## Current Profile\n${state.currentGeneration.fullText}`;
+        const charData = state.selectedCharData;
+
+        let userPrompt = '';
+
+        // 캐릭터 데이터
+        if (charData) {
+            userPrompt += `## Target Character Information\n⚠️ The data below is REFERENCE MATERIAL ONLY.\n\n${formatCharacterData(charData)}\n\n`;
+        }
+
+        // 월드인포
+        const settings = getSettings();
+        if (settings.includeWorldInfo) {
+            const wiText = formatWorldInfoEntries();
+            if (wiText) {
+                userPrompt += `## World Information\n${wiText}\n\n`;
+            }
+        }
+
+        userPrompt += `## Current Profile\n${state.currentGeneration.fullText}`;
 
         userPrompt += `\n\n## Modification Instructions\n${instructions}`;
 
