@@ -267,23 +267,4 @@ async function fetchWorldInfoBook(bookName) {
     return [];
 }
 
-/**
- * WI 엔트리에서 지시문 성격의 엔트리를 추정
- * (키워드 기반 휴리스틱)
- * @param {Object} entry
- * @returns {boolean} 지시문일 가능성이 높으면 true
- */
-export function isLikelyInstruction(entry) {
-    const content = (entry.content || '').toLowerCase();
-    const comment = (entry.comment || '').toLowerCase();
 
-    const instructionKeywords = [
-        'instruction', 'guideline', 'rule', 'system',
-        'jailbreak', 'prompt', 'ooc', 'out of character',
-        '지시', '규칙', '가이드라인', '시스템',
-    ];
-
-    return instructionKeywords.some(kw =>
-        content.includes(kw) || comment.includes(kw)
-    );
-}

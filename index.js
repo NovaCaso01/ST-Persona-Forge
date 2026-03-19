@@ -6,8 +6,6 @@
  * 어울리는 {{user}} 페르소나를 AI로 생성합니다.
  */
 
-import { extension_settings } from "../../../extensions.js";
-import { eventSource, event_types } from "../../../../script.js";
 import { extensionName } from './src/constants.js';
 import { state, log } from './src/state.js';
 import { loadSettings } from './src/storage.js';

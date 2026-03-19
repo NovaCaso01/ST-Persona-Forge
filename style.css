@@ -1044,6 +1044,108 @@
     border-color: rgba(231, 76, 60, 0.25);
 }
 
+/* --- 월드인포 북 멀티셀렉트 --- */
+.pf-wi-book-multi {
+    position: relative;
+    margin-bottom: 8px;
+}
+
+.pf-wi-book-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    background: var(--pf-bg-input);
+    border: 1px solid var(--pf-border);
+    border-radius: var(--pf-radius-xs);
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--pf-text);
+    transition: var(--pf-transition);
+    user-select: none;
+}
+
+.pf-wi-book-toggle:hover {
+    border-color: var(--pf-accent);
+}
+
+.pf-wi-book-toggle.open {
+    border-color: var(--pf-accent);
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+}
+
+.pf-wi-book-arrow {
+    font-size: 11px;
+    color: var(--pf-text-dim);
+    transition: transform 0.2s ease;
+}
+
+.pf-wi-book-toggle.open .pf-wi-book-arrow {
+    transform: rotate(180deg);
+}
+
+#pf-wi-book-label {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.pf-wi-book-dropdown {
+    position: absolute;
+    z-index: 50;
+    left: 0;
+    right: 0;
+    background: var(--pf-bg-input);
+    border: 1px solid var(--pf-accent);
+    border-top: none;
+    border-bottom-left-radius: var(--pf-radius-xs);
+    border-bottom-right-radius: var(--pf-radius-xs);
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.pf-wi-book-list {
+    padding: 4px 0;
+}
+
+.pf-wi-book-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 12px;
+    cursor: pointer;
+    font-size: 12px;
+    color: var(--pf-text);
+    transition: background 0.15s ease;
+}
+
+.pf-wi-book-item:hover {
+    background: var(--pf-bg-hover);
+}
+
+.pf-wi-book-item input[type="checkbox"] {
+    accent-color: var(--pf-accent);
+    flex-shrink: 0;
+    margin: 0;
+}
+
+.pf-wi-book-item-label {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.pf-wi-book-item-icon {
+    font-size: 11px;
+    color: var(--pf-text-dim);
+    flex-shrink: 0;
+    width: 16px;
+    text-align: center;
+}
+
 /* --- 월드인포 엔트리 --- */
 .pf-wi-controls {
     display: flex;
@@ -1596,6 +1698,42 @@
     padding-top: 16px;
     border-top: 1px solid var(--pf-border);
     text-align: right;
+}
+
+.pf-history-controls-row {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+/* --- 히스토리 검색/필터 --- */
+.pf-history-filter-bar {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 12px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--pf-border);
+}
+
+.pf-history-filters {
+    display: flex;
+    gap: 6px;
+}
+
+.pf-history-filters .pf-select-small {
+    flex: 1;
+}
+
+/* --- 취소 버튼 --- */
+.pf-cancel-btn {
+    opacity: 0.8;
+    transition: opacity 0.2s ease;
+}
+
+.pf-cancel-btn:hover {
+    opacity: 1;
 }
 
 /* --- 스크롤바 --- */

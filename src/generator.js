@@ -2,7 +2,6 @@
  * 페르소나 대장간 - 페르소나 생성 로직
  */
 
-import { getContext } from "../../../../extensions.js";
 import {
     PROFILE_FIELDS, TEMPLATE_PRESETS, LANGUAGES,
     SYSTEM_PROMPT, REGEN_SYSTEM_PROMPT, TRANSLATE_SYSTEM_PROMPT, MODIFY_SYSTEM_PROMPT,
@@ -254,6 +253,11 @@ Begin writing the player character persona profile now.`;
         const activeSystemPrompt = (getSettings().customSystemPrompt || '').trim() || SYSTEM_PROMPT;
         const response = await callGenerationAPI(activeSystemPrompt, userPrompt);
 
+        // 취소 확인
+        if (state.isCancelled) {
+            throw new Error('CANCELLED');
+        }
+
         if (!response || !response.trim()) {
             throw new Error('API에서 빈 응답을 받았습니다.');
         }
@@ -277,8 +281,7 @@ Begin writing the player character persona profile now.`;
             };
         } else {
             // 템플릿 모드: 섹션 파싱
-            const fields = getActiveFields();
-            const sections = parseResponse(cleanedResponse, fields);
+            const sections = parseResponse(cleanedResponse);
 
             state.currentGeneration = {
                 sections,
@@ -304,13 +307,18 @@ Begin writing the player character persona profile now.`;
 
 /**
  * 특정 섹션 재생성
- * @param {string} sectionId - 재생성할 필드 ID
+ * @param {string} sectionKey - 섹션 키 (section_0, section_1, ...)
  * @param {string} additionalInstructions - 추가 지시사항
  * @returns {Promise<Object>} 업데이트된 생성 데이터
  */
-export async function regenerateSection(sectionId, additionalInstructions = '') {
+export async function regenerateSection(sectionKey, additionalInstructions = '') {
     if (!state.currentGeneration) {
         throw new Error('생성된 페르소나가 없습니다.');
+    }
+
+    const section = state.currentGeneration.sections[sectionKey];
+    if (!section) {
+        throw new Error(`알 수 없는 섹션: ${sectionKey}`);
     }
 
     const charData = state.selectedCharData;
@@ -318,10 +326,8 @@ export async function regenerateSection(sectionId, additionalInstructions = '') 
         throw new Error('캐릭터 데이터를 찾을 수 없습니다.');
     }
 
-    const field = PROFILE_FIELDS[sectionId];
-    if (!field) {
-        throw new Error(`알 수 없는 필드: ${sectionId}`);
-    }
+    // 헤더에서 섹션 제목 추출 (## 제거)
+    const sectionTitle = section.header.replace(/^#{1,3}\s+/, '').trim();
 
     setGenerating(true);
 
@@ -333,7 +339,7 @@ export async function regenerateSection(sectionId, additionalInstructions = '') 
 
         userPrompt += `\n\n## Current Full Profile\n${state.currentGeneration.fullText}`;
 
-        userPrompt += `\n\n## Section to Regenerate\n## ${field.labelEn} — ${field.description}`;
+        userPrompt += `\n\n## Section to Regenerate\n${section.header}`;
 
         if (additionalInstructions.trim()) {
             userPrompt += `\n\n## Additional Instructions from User\n${additionalInstructions}`;
@@ -341,11 +347,15 @@ export async function regenerateSection(sectionId, additionalInstructions = '') 
 
         userPrompt += `\n\n## Language\n${langInfo.instruction}`;
 
-        userPrompt += `\n\nRegenerate ONLY the ## ${field.labelEn} section now. Output the section with its ## header.`;
+        userPrompt += `\n\nRegenerate ONLY the "${sectionTitle}" section now. Output the section with its ## header.`;
 
-        log(`Regenerating section: ${sectionId}`);
+        log(`Regenerating section: ${sectionKey} (${sectionTitle})`);
 
         const response = await callGenerationAPI(REGEN_SYSTEM_PROMPT, userPrompt);
+
+        if (state.isCancelled) {
+            throw new Error('CANCELLED');
+        }
 
         if (!response || !response.trim()) {
             throw new Error('API에서 빈 응답을 받았습니다.');
@@ -354,16 +364,17 @@ export async function regenerateSection(sectionId, additionalInstructions = '') 
         // 재생성된 섹션 파싱 (출력 후처리 적용)
         const newContent = cleanGeneratedText(response);
 
-        // 기존 섹션 업데이트
-        state.currentGeneration.sections[sectionId] = {
-            header: `## ${field.labelEn}`,
+        // 기존 섹션 업데이트 — 헤더는 새로 생성된 내용에서 추출, 없으면 기존 헤더 유지
+        const newHeaderMatch = newContent.match(/^(#{1,3})\s+(.+)$/m);
+        state.currentGeneration.sections[sectionKey] = {
+            header: newHeaderMatch ? newHeaderMatch[0] : section.header,
             content: newContent,
         };
 
         // fullText 재조합
         rebuildFullText();
 
-        log(`Section ${sectionId} regenerated successfully`);
+        log(`Section ${sectionKey} regenerated successfully`);
         return state.currentGeneration;
 
     } finally {
@@ -419,6 +430,10 @@ ${state.currentGeneration.fullText}`;
 
         const response = await callGenerationAPI(TRANSLATE_SYSTEM_PROMPT, userPrompt);
 
+        if (state.isCancelled) {
+            throw new Error('CANCELLED');
+        }
+
         if (!response || !response.trim()) {
             throw new Error('번역 API에서 빈 응답을 받았습니다.');
         }
@@ -428,8 +443,7 @@ ${state.currentGeneration.fullText}`;
         if (state.currentGeneration.isCustomSheet) {
             state.currentGeneration.sections = { _custom: { header: '', content: cleanedTranslation } };
         } else {
-            const fields = Object.keys(state.currentGeneration.sections);
-            const newSections = parseResponse(cleanedTranslation, fields);
+            const newSections = parseResponse(cleanedTranslation);
             state.currentGeneration.sections = newSections;
         }
 
@@ -447,12 +461,13 @@ ${state.currentGeneration.fullText}`;
 // ===== 응답 파싱 =====
 
 /**
- * LLM 응답을 섹션별로 파싱 (관대한 파싱)
+ * LLM 응답을 섹션별로 파싱 (헤더 그대로 파싱)
+ * - 헤더를 fieldId에 매칭하지 않고, 순서 기반 인덱스 키(section_0, section_1, ...)를 사용
+ * - 어떤 언어로 번역되든 헤더가 그대로 보존됨
  * @param {string} response - LLM 응답 전체 텍스트
- * @param {Array<string>} expectedFields - 예상 필드 ID 배열
- * @returns {Object} { fieldId: { header, content }, ... }
+ * @returns {Object} { section_0: { header, content }, section_1: { header, content }, ... }
  */
-function parseResponse(response, expectedFields) {
+function parseResponse(response) {
     const sections = {};
     const text = response.trim();
 
@@ -472,18 +487,14 @@ function parseResponse(response, expectedFields) {
 
     if (headerMatches.length === 0) {
         // 헤더가 없는 경우 — 전체를 하나의 블록으로 처리
-        const firstField = expectedFields[0] || 'basics';
-        sections[firstField] = {
-            header: `## ${PROFILE_FIELDS[firstField]?.labelEn || 'PROFILE'}`,
+        sections['section_0'] = {
+            header: '## PROFILE',
             content: text,
         };
         return sections;
     }
 
-    // 이미 할당된 필드 추적 (중복 할당 방지)
-    const assignedFields = new Set();
-
-    // 각 헤더 매치를 필드에 매핑
+    // 각 헤더를 순서대로 섹션으로 분리
     for (let i = 0; i < headerMatches.length; i++) {
         const hm = headerMatches[i];
         const nextIndex = (i + 1 < headerMatches.length)
@@ -491,90 +502,48 @@ function parseResponse(response, expectedFields) {
             : text.length;
 
         const sectionContent = text.substring(hm.index, nextIndex).trim();
+        const key = `section_${i}`;
 
-        // 타이틀 정규화: 소문자화, 특수문자 제거, 다중 공백 통합
-        const titleLower = hm.title.toLowerCase()
-            .replace(/[^a-z가-힣\s]/g, '')
-            .replace(/\s+/g, ' ')
-            .trim();
-
-        // 전체 PROFILE_FIELDS 대상으로 최장 키워드 매칭 (할당 완료 필드 제외)
-        const fieldId = matchFieldToTitle(titleLower, assignedFields);
-
-        if (fieldId && !assignedFields.has(fieldId)) {
-            sections[fieldId] = {
-                header: hm.fullMatch,
-                content: sectionContent,
-            };
-            assignedFields.add(fieldId);
-        } else {
-            // 매칭 실패 또는 중복 — 미할당 expectedField에 순서대로 배치
-            const unassigned = expectedFields.find(f => !assignedFields.has(f));
-            if (unassigned) {
-                sections[unassigned] = {
-                    header: hm.fullMatch,
-                    content: sectionContent,
-                };
-                assignedFields.add(unassigned);
-            }
-        }
-    }
-
-    // 매칭되지 않은 expected 필드 — 빈 상태로 두기 (재생성 가능)
-    for (const fieldId of expectedFields) {
-        if (!sections[fieldId]) {
-            sections[fieldId] = {
-                header: `## ${PROFILE_FIELDS[fieldId]?.labelEn || fieldId.toUpperCase()}`,
-                content: '',
-            };
-        }
+        sections[key] = {
+            header: hm.fullMatch,
+            content: sectionContent,
+        };
     }
 
     return sections;
 }
 
 /**
- * 헤더 타이틀을 필드 ID에 매칭 (최장 키워드 우선 매칭)
- * - 전체 PROFILE_FIELDS를 대상으로 검사 (expectedFields 제한 없음)
- * - 이미 할당된 필드는 건너뜀
- * - 가장 긴 키워드가 매칭된 필드를 반환 (오버랩 방지)
- * @param {string} titleLower - 정규화된 소문자 타이틀
- * @param {Set} assignedFields - 이미 할당된 필드 ID Set
- * @returns {string|null}
+ * 헤더 텍스트에서 아이콘을 추측 (하이브리드: 매칭 시도 → 폴백)
+ * @param {string} headerText - 헤더 텍스트 (## 제외)
+ * @returns {string} FontAwesome 아이콘 클래스
  */
-function matchFieldToTitle(titleLower, assignedFields) {
-    const mappings = {
-        basics: ['basic information', 'basic info', 'basics', 'basic', '기본 정보', '기본정보', '기본'],
-        appearance: ['physical appearance', 'appearance', 'look', 'looks', 'physical', '외모', '외형'],
-        background: ['background', 'backstory', 'history', 'origin', '배경', '과거'],
-        personality: ['personality', 'temperament', '성격', '인격'],
-        skills: ['skills and abilities', 'skills abilities', 'skills', 'skill', 'abilities', 'ability', '능력 기술', '능력', '기술', '스킬'],
-        relationships: ['relationships', 'relationship', 'relation', '관계'],
-        speech: ['speech examples', 'speech pattern', 'speech patterns', 'speech', 'dialogue', '말투 대사', '말투', '대사'],
-        quirks: ['quirks and habits', 'quirks habits', 'quirks', 'habits', '버릇 습관', '버릇', '습관'],
-        nsfw_appearance: ['nsfw appearance', 'nsfw 외모', 'intimate appearance', 'intimate physical', 'nsfw'],
-        sexual_preferences: ['romantic and sexual preferences', 'romantic sexual preferences', 'sexual preferences', 'romantic preferences', 'sexual behavior', '성적 취향', '로맨틱 성적', '성적'],
-        hidden_desires: ['hidden desires and guilt', 'hidden desires guilt', 'hidden desires', 'hidden desire', 'secret desires', '숨겨진 욕망 죄책감', '숨겨진 욕망', '내적 갈등', '숨겨진', '욕망'],
-        ai_guidelines: ['ai guidelines', 'ai guideline', 'guidelines for ai', 'ai 가이드라인', 'ai 가이드', 'guidelines', 'guideline'],
-        character_notes: ['character notes', 'additional notes', 'notes', 'misc', '캐릭터 노트', '추가 참고사항', '참고사항', '참고', '노트'],
-    };
+export function guessIconForHeader(headerText) {
+    const lower = headerText.toLowerCase();
 
-    let bestMatch = null;
-    let bestLength = 0;
+    const iconMap = [
+        { keywords: ['basic', '기본', '基本', '基本情報'], icon: 'fa-solid fa-id-card' },
+        { keywords: ['appearance', '외모', '외형', '外見', '外貌'], icon: 'fa-solid fa-user' },
+        { keywords: ['background', 'backstory', '배경', '過去', '背景', '背景故事'], icon: 'fa-solid fa-book-open' },
+        { keywords: ['personality', '성격', '人格', '性格'], icon: 'fa-solid fa-gem' },
+        { keywords: ['quirk', 'habit', '버릇', '습관', '癖', '怖'], icon: 'fa-solid fa-puzzle-piece' },
+        { keywords: ['skill', 'abilit', '능력', '기술', 'スキル', '技能'], icon: 'fa-solid fa-bolt' },
+        { keywords: ['relationship', '관계', '関係', '关系'], icon: 'fa-solid fa-heart' },
+        { keywords: ['hidden desire', 'guilt', '숨겨진', '욕망', '秘密', '欲望'], icon: 'fa-solid fa-moon' },
+        { keywords: ['speech', 'dialogue', '말투', '대사', '話し方', '台词'], icon: 'fa-solid fa-comment-dots' },
+        { keywords: ['nsfw appearance', 'intimate', 'nsfw 외모'], icon: 'fa-solid fa-eye-slash' },
+        { keywords: ['sexual', 'romantic', '성적', '로맨틱', '性的'], icon: 'fa-solid fa-fire' },
+        { keywords: ['ai guide', 'guideline', 'ai 가이드', 'AIガイド'], icon: 'fa-solid fa-robot' },
+        { keywords: ['note', '노트', '참고', 'ノート', '备注'], icon: 'fa-solid fa-note-sticky' },
+    ];
 
-    for (const [fieldId, keywords] of Object.entries(mappings)) {
-        // 이미 할당된 필드는 건너뛰기
-        if (assignedFields && assignedFields.has(fieldId)) continue;
-
-        for (const kw of keywords) {
-            if (titleLower.includes(kw) && kw.length > bestLength) {
-                bestMatch = fieldId;
-                bestLength = kw.length;
-            }
+    for (const entry of iconMap) {
+        if (entry.keywords.some(kw => lower.includes(kw))) {
+            return entry.icon;
         }
     }
 
-    return bestMatch;
+    return 'fa-solid fa-file-lines'; // 기본 폴백 아이콘
 }
 
 /**
@@ -589,11 +558,15 @@ function rebuildFullText() {
         return;
     }
 
-    const fields = getActiveFields();
     const parts = [];
+    const keys = Object.keys(state.currentGeneration.sections).sort((a, b) => {
+        const numA = parseInt(a.replace('section_', ''), 10);
+        const numB = parseInt(b.replace('section_', ''), 10);
+        return numA - numB;
+    });
 
-    for (const fieldId of fields) {
-        const section = state.currentGeneration.sections[fieldId];
+    for (const key of keys) {
+        const section = state.currentGeneration.sections[key];
         if (section?.content) {
             parts.push(section.content);
         }
@@ -614,8 +587,7 @@ export function updateFromEditedText(newText) {
     if (state.currentGeneration.isCustomSheet) {
         state.currentGeneration.sections = { _custom: { header: '', content: newText } };
     } else {
-        const fields = Object.keys(state.currentGeneration.sections);
-        state.currentGeneration.sections = parseResponse(newText, fields);
+        state.currentGeneration.sections = parseResponse(newText);
     }
 }
 
@@ -652,6 +624,10 @@ export async function modifyProfile(instructions) {
 
         const response = await callGenerationAPI(MODIFY_SYSTEM_PROMPT, userPrompt);
 
+        if (state.isCancelled) {
+            throw new Error('CANCELLED');
+        }
+
         if (!response || !response.trim()) {
             throw new Error('API에서 빈 응답을 받았습니다.');
         }
@@ -661,8 +637,7 @@ export async function modifyProfile(instructions) {
         if (state.currentGeneration.isCustomSheet) {
             state.currentGeneration.sections = { _custom: { header: '', content: cleanedModified } };
         } else {
-            const fields = Object.keys(state.currentGeneration.sections);
-            state.currentGeneration.sections = parseResponse(cleanedModified, fields);
+            state.currentGeneration.sections = parseResponse(cleanedModified);
         }
         state.currentGeneration.fullText = cleanedModified;
 

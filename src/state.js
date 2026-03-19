@@ -12,7 +12,7 @@ export const state = {
     /** @type {Object|null} 현재 생성된 페르소나 데이터 */
     currentGeneration: null,
     // {
-    //   sections: { fieldId: { header: '## HEADER', content: 'content...' }, ... },
+    //   sections: { section_0: { header: '## HEADER', content: 'content...' }, ... },
     //   fullText: 'combined text',
     //   charName: 'Character Name',
     //   charIndex: 0,
@@ -27,8 +27,14 @@ export const state = {
     /** @type {Set<number>} 선택된 WI 엔트리 인덱스 */
     selectedWIEntries: new Set(),
 
+    /** @type {Set<string>} 선택된 WI 북 이름들 ('__char__' 포함 가능) */
+    selectedWIBooks: new Set(),
+
     /** @type {Array} 로드된 WI 엔트리 목록 */
     loadedWIEntries: [],
+
+    /** @type {boolean} 생성 취소 플래그 */
+    isCancelled: false,
 
     /** @type {number} 선택된 캐릭터 인덱스 */
     selectedCharIndex: -1,
@@ -71,4 +77,12 @@ export function getSettings() {
  */
 export function setGenerating(generating) {
     state.isGenerating = generating;
+}
+
+/**
+ * 생성 취소 상태 설정
+ * @param {boolean} cancelled
+ */
+export function setCancelled(cancelled) {
+    state.isCancelled = cancelled;
 }

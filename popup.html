@@ -61,10 +61,19 @@
                         </label>
                     </div>
                     <div id="pf-wi-container" style="display: none;">
+                        <!-- WI 북 멀티셀렉트 -->
+                        <div class="pf-wi-book-multi">
+                            <div id="pf-wi-book-toggle" class="pf-wi-book-toggle">
+                                <span id="pf-wi-book-label">월드인포 북 선택...</span>
+                                <i class="fa-solid fa-chevron-down pf-wi-book-arrow"></i>
+                            </div>
+                            <div id="pf-wi-book-dropdown" class="pf-wi-book-dropdown" style="display: none;">
+                                <div id="pf-wi-book-list" class="pf-wi-book-list">
+                                    <!-- 동적으로 채워짐 -->
+                                </div>
+                            </div>
+                        </div>
                         <div class="pf-wi-controls">
-                            <select id="pf-wi-book-select" class="pf-select" style="margin-bottom: 8px;">
-                                <option value="__char__">캐릭터 연결 월드인포</option>
-                            </select>
                             <button id="pf-wi-select-all" class="pf-btn pf-small-btn">모두 선택</button>
                             <button id="pf-wi-deselect-all" class="pf-btn pf-small-btn">모두 해제</button>
                             <input type="text" id="pf-wi-search" class="pf-input" placeholder="엔트리 검색...">
@@ -177,6 +186,20 @@
                     <div class="pf-hint">라이트 모드로 전환합니다.</div>
                 </div>
 
+                <div class="pf-divider"></div>
+
+                <!-- 히스토리 자동 저장 -->
+                <div class="pf-section">
+                    <div class="pf-section-title">
+                        <i class="fa-solid fa-floppy-disk"></i> 히스토리 자동 저장
+                        <label class="pf-switch">
+                            <input type="checkbox" id="pf-autosave-toggle">
+                            <span class="pf-switch-slider"></span>
+                        </label>
+                    </div>
+                    <div class="pf-hint">생성 완료 시 자동으로 히스토리에 저장합니다.</div>
+                </div>
+
                 <!-- 생성 버튼 -->
                 <div class="pf-section pf-center">
                     <button id="pf-generate-btn" class="pf-primary-btn">
@@ -196,6 +219,9 @@
                         <div class="pf-forge-anvil"></div>
                     </div>
                     <span id="pf-gen-loading-text">페르소나를 대장간에서 벼려내는 중...</span>
+                    <button id="pf-cancel-gen-btn" class="pf-btn pf-small-btn pf-cancel-btn" style="margin-top: 12px;">
+                        <i class="fa-solid fa-xmark"></i> 생성 취소
+                    </button>
                 </div>
 
                 <!-- 빈 상태 -->
@@ -216,6 +242,9 @@
                             <span id="pf-result-lang" class="pf-result-badge"></span>
                         </div>
                         <div class="pf-result-actions">
+                            <button id="pf-edit-toggle-btn" class="pf-btn pf-small-btn" title="편집 모드">
+                                <i class="fa-solid fa-pen"></i> 편집
+                            </button>
                             <button id="pf-regen-all-btn" class="pf-btn pf-small-btn" title="전체 재생성">
                                 <i class="fa-solid fa-arrows-rotate"></i> 재생성
                             </button>
@@ -254,7 +283,13 @@
                     <!-- 섹션 카드 컨테이너 (미리보기 모드) -->
                     <div id="pf-sections-container"></div>
 
-
+                    <!-- 전체 편집 모드 -->
+                    <div id="pf-edit-area" style="display: none;">
+                        <textarea id="pf-edit-textarea" class="pf-textarea" rows="20"></textarea>
+                        <div style="margin-top: 8px; display: flex; gap: 6px;">
+                            <button id="pf-edit-apply" class="pf-primary-btn pf-small-btn"><i class="fa-solid fa-check"></i> 편집 적용</button>
+                        </div>
+                    </div>
 
                     <!-- 하단 컨트롤 -->
                     <div class="pf-bottom-bar">
@@ -274,15 +309,45 @@
 
             <!-- ===== 히스토리 탭 ===== -->
             <div class="pf-tab-content" id="pf-history-tab" data-tab="history">
+                <!-- 히스토리 검색/필터 -->
+                <div class="pf-history-filter-bar">
+                    <input type="text" id="pf-history-search" class="pf-input" placeholder="이름 또는 캐릭터명 검색...">
+                    <div class="pf-history-filters">
+                        <select id="pf-history-filter-lang" class="pf-select pf-select-small">
+                            <option value="">모든 언어</option>
+                            <option value="en">English</option>
+                            <option value="ko">한국어</option>
+                            <option value="ja">日本語</option>
+                            <option value="zh">中文</option>
+                        </select>
+                        <select id="pf-history-filter-template" class="pf-select pf-select-small">
+                            <option value="">모든 템플릿</option>
+                            <option value="basic">Basic</option>
+                            <option value="standard">Standard</option>
+                            <option value="detailed">Detailed</option>
+                            <option value="full">Full</option>
+                            <option value="choice">Choice</option>
+                            <option value="custom">Custom</option>
+                        </select>
+                    </div>
+                </div>
                 <div id="pf-history-empty" class="pf-empty-state">
                     <div class="pf-empty-icon"><i class="fa-solid fa-clock-rotate-left"></i></div>
                     <p>저장된 히스토리가 없습니다.</p>
                 </div>
                 <div id="pf-history-list" style="display: none;"></div>
                 <div id="pf-history-controls" style="display: none;">
-                    <button id="pf-history-clear" class="pf-btn pf-danger-btn">
-                        <i class="fa-solid fa-trash-can"></i> 전체 삭제
-                    </button>
+                    <div class="pf-history-controls-row">
+                        <button id="pf-history-export" class="pf-btn pf-small-btn" title="히스토리 내보내기">
+                            <i class="fa-solid fa-file-export"></i> 내보내기
+                        </button>
+                        <button id="pf-history-import" class="pf-btn pf-small-btn" title="히스토리 가져오기">
+                            <i class="fa-solid fa-file-import"></i> 가져오기
+                        </button>
+                        <button id="pf-history-clear" class="pf-btn pf-small-btn pf-danger-btn">
+                            <i class="fa-solid fa-trash-can"></i> 전체 삭제
+                        </button>
+                    </div>
                 </div>
             </div>
 

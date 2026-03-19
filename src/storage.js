@@ -107,15 +107,6 @@ export function deleteFromHistory(id) {
 }
 
 /**
- * 히스토리에서 항목 가져오기
- * @param {string} id
- * @returns {Object|null}
- */
-export function getHistoryItem(id) {
-    return state.settings?.history?.find(h => h.id === id) || null;
-}
-
-/**
  * 전체 히스토리 삭제
  */
 export function clearHistory() {

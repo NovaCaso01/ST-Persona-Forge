@@ -200,6 +200,9 @@ export const defaultSettings = {
     // 월드인포
     includeWorldInfo: false,
 
+    // 히스토리 자동 저장
+    autoSaveHistory: false,
+
     // 커스텀 시스템 프롬프트 (빈 문자열이면 기본 SYSTEM_PROMPT 사용)
     customSystemPrompt: '',
 
@@ -278,3 +281,5 @@ Rules:
 3. Maintain the same formatting style and structure as the original
 4. If the user's instruction is ambiguous, make minimal changes
 5. Output the complete modified profile. No preamble, no explanation.`;
+
+

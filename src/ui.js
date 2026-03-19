@@ -10,11 +10,11 @@ import {
     SYSTEM_PROMPT,
     defaultSettings,
 } from './constants.js';
-import { state, log, logError, getSettings } from './state.js';
+import { state, log, logError, getSettings, setCancelled } from './state.js';
 import { updateSetting, saveToHistory, getHistory, deleteFromHistory, clearHistory } from './storage.js';
 import { getConnectionProfiles } from './api.js';
 import { loadCharacterWorldInfo, getAvailableWorldInfoBooks, loadWorldInfoBookEntries } from './worldinfo.js';
-import { generatePersona, regenerateSection, regenerateAll, translateProfile, updateFromEditedText, modifyProfile } from './generator.js';
+import { generatePersona, regenerateSection, regenerateAll, translateProfile, updateFromEditedText, modifyProfile, guessIconForHeader } from './generator.js';
 
 // ===== 편집 모드 상태 =====
 let isEditMode = false;
@@ -118,8 +118,18 @@ export function bindUIEvents() {
     // WI 엔트리 개별 체크
     $(document).on('change', '.pf-wi-entry-cb', onWIEntryToggle);
 
-    // WI 북 선택
-    $(document).on('change', '#pf-wi-book-select', onWIBookSelect);
+    // WI 북 멀티셀렉트 토글
+    $(document).on('click', '#pf-wi-book-toggle', onWIBookDropdownToggle);
+
+    // WI 북 체크박스 토글
+    $(document).on('change', '.pf-wi-book-cb', onWIBookCheckToggle);
+
+    // WI 북 드롭다운 외부 클릭 시 닫기
+    $(document).on('click', (e) => {
+        if (!$(e.target).closest('.pf-wi-book-multi').length) {
+            closeWIBookDropdown();
+        }
+    });
 
     // 생성 모드 변경
     $(document).on('change', 'input[name="pf-gen-mode"]', onModeChange);
@@ -142,6 +152,9 @@ export function bindUIEvents() {
 
     // 생성 버튼
     $(document).on('click', '#pf-generate-btn', onGenerateClick);
+
+    // 생성 취소
+    $(document).on('click', '#pf-cancel-gen-btn', onCancelGeneration);
 
     // === 생성 탭 이벤트 ===
 
@@ -186,6 +199,9 @@ export function bindUIEvents() {
     // 테마 토글
     $(document).on('change', '#pf-theme-toggle', onThemeToggle);
 
+    // 자동 저장 토글
+    $(document).on('change', '#pf-autosave-toggle', onAutoSaveToggle);
+
     // 클립보드 복사
     $(document).on('click', '#pf-copy-btn', onCopyClick);
 
@@ -200,6 +216,15 @@ export function bindUIEvents() {
     $(document).on('click', '.pf-history-copy', onHistoryCopy);
     $(document).on('click', '.pf-history-delete', onHistoryDelete);
     $(document).on('click', '#pf-history-clear', onHistoryClear);
+
+    // 히스토리 검색/필터
+    $(document).on('input', '#pf-history-search', onHistoryFilterChange);
+    $(document).on('change', '#pf-history-filter-lang', onHistoryFilterChange);
+    $(document).on('change', '#pf-history-filter-template', onHistoryFilterChange);
+
+    // 히스토리 내보내기/가져오기
+    $(document).on('click', '#pf-history-export', onHistoryExport);
+    $(document).on('click', '#pf-history-import', onHistoryImport);
 
     // === 수정 지시 이벤트 (커스텀 시트 모드) ===
     $(document).on('click', '#pf-modify-toggle-btn', () => {
@@ -274,6 +299,9 @@ function updateSettingsUI() {
     // 시트 템플릿 복원
     $('#pf-sheet-text').val(settings.sheetTemplate || '');
 
+    // 히스토리 자동 저장
+    $('#pf-autosave-toggle').prop('checked', settings.autoSaveHistory || false);
+
     // 테마
     const theme = settings.theme || 'dark';
     $('#pf-theme-toggle').prop('checked', theme === 'light');
@@ -312,7 +340,9 @@ async function onCharacterSelect() {
         state.selectedCharData = null;
         state.loadedWIEntries = [];
         state.selectedWIEntries.clear();
+        state.selectedWIBooks.clear();
         updateWIEntryList();
+        updateWIBookLabel();
         return;
     }
 
@@ -323,7 +353,12 @@ async function onCharacterSelect() {
     // WI 엔트리 로드
     if ($('#pf-wi-toggle').prop('checked')) {
         await populateWIBookDropdown();
-        await loadAndDisplayWIEntries(charIndex);
+        // 캐릭터 연결 WI 자동 선택
+        state.selectedWIBooks.clear();
+        state.selectedWIBooks.add('__char__');
+        updateWIBookCheckboxes();
+        updateWIBookLabel();
+        await loadAndMergeSelectedBooks();
     }
 }
 
@@ -337,98 +372,197 @@ async function onWorldInfoToggle() {
     if (enabled) {
         await populateWIBookDropdown();
         if (state.selectedCharIndex >= 0) {
-            await loadAndDisplayWIEntries(state.selectedCharIndex);
+            // 캐릭터 연결 WI 자동 선택
+            state.selectedWIBooks.clear();
+            state.selectedWIBooks.add('__char__');
+            updateWIBookCheckboxes();
+            updateWIBookLabel();
+            await loadAndMergeSelectedBooks();
         }
     }
 }
 
 /**
- * WI 북 드롭다운에 사용 가능한 북 목록 채우기
+ * WI 북 멀티셀렉트 드롭다운 토글
+ */
+function onWIBookDropdownToggle() {
+    const $dropdown = $('#pf-wi-book-dropdown');
+    const $toggle = $('#pf-wi-book-toggle');
+    const isOpen = $dropdown.is(':visible');
+
+    if (isOpen) {
+        closeWIBookDropdown();
+    } else {
+        $dropdown.show();
+        $toggle.addClass('open');
+    }
+}
+
+function closeWIBookDropdown() {
+    $('#pf-wi-book-dropdown').hide();
+    $('#pf-wi-book-toggle').removeClass('open');
+}
+
+/**
+ * WI 북 드롭다운에 사용 가능한 북 목록 채우기 (멀티셀렉트 체크박스)
  */
 async function populateWIBookDropdown() {
-    const $select = $('#pf-wi-book-select');
-    const currentVal = $select.val();
+    const $list = $('#pf-wi-book-list');
+    $list.empty();
 
-    $select.empty();
-    $select.append('<option value="__char__">캐릭터 연결 월드인포</option>');
+    // 캐릭터 연결 WI (항상 첫 번째)
+    $list.append(`
+        <div class="pf-wi-book-item">
+            <input type="checkbox" class="pf-wi-book-cb" data-book="__char__">
+            <span class="pf-wi-book-item-icon"><i class="fa-solid fa-user"></i></span>
+            <span class="pf-wi-book-item-label">캐릭터 연결 월드인포</span>
+        </div>
+    `);
 
     try {
         const books = await getAvailableWorldInfoBooks();
         log(`WI book list: ${books.length} books found`);
         for (const bookName of books) {
-            const $opt = $('<option></option>').val(bookName).text(bookName);
-            $select.append($opt);
+            $list.append(`
+                <div class="pf-wi-book-item">
+                    <input type="checkbox" class="pf-wi-book-cb" data-book="${escapeHtml(bookName)}">
+                    <span class="pf-wi-book-item-icon"><i class="fa-solid fa-book"></i></span>
+                    <span class="pf-wi-book-item-label">${escapeHtml(bookName)}</span>
+                </div>
+            `);
         }
     } catch (e) {
         logError('populateWIBooks', e);
     }
 
-    // 이전 선택 복원
-    if (currentVal && $select.find('option').filter(function() { return $(this).val() === currentVal; }).length) {
-        $select.val(currentVal);
+    // 현재 선택 상태 복원
+    updateWIBookCheckboxes();
+}
+
+/**
+ * 체크박스 상태를 state.selectedWIBooks에 맞게 동기화
+ */
+function updateWIBookCheckboxes() {
+    $('.pf-wi-book-cb').each(function () {
+        const bookName = $(this).data('book');
+        $(this).prop('checked', state.selectedWIBooks.has(bookName));
+    });
+}
+
+/**
+ * 멀티셀렉트 라벨 업데이트
+ */
+function updateWIBookLabel() {
+    const $label = $('#pf-wi-book-label');
+    const count = state.selectedWIBooks.size;
+
+    if (count === 0) {
+        $label.text('월드인포 북 선택...');
+        return;
+    }
+
+    // 선택된 북 이름들 수집
+    const names = [];
+    for (const book of state.selectedWIBooks) {
+        if (book === '__char__') {
+            names.push('캐릭터 연결');
+        } else {
+            names.push(book);
+        }
+    }
+
+    if (names.length <= 2) {
+        $label.text(names.join(', '));
     } else {
-        $select.val('__char__');
+        $label.text(`${names[0]} 외 ${names.length - 1}개`);
     }
 }
 
 /**
- * WI 북 선택 변경 시
+ * WI 북 체크박스 토글 시 — 선택된 모든 북의 엔트리를 머지하여 표시
  */
-async function onWIBookSelect() {
-    const selected = $('#pf-wi-book-select').val();
+async function onWIBookCheckToggle() {
+    const bookName = $(this).data('book');
+    const checked = $(this).prop('checked');
+
+    if (checked) {
+        state.selectedWIBooks.add(bookName);
+    } else {
+        state.selectedWIBooks.delete(bookName);
+    }
+
+    updateWIBookLabel();
+    await loadAndMergeSelectedBooks();
+}
+
+/**
+ * 선택된 모든 WI 북에서 엔트리를 로드 & 머지 (중복 제거)
+ */
+async function loadAndMergeSelectedBooks() {
     const $list = $('#pf-wi-entry-list');
+
+    if (state.selectedWIBooks.size === 0) {
+        state.loadedWIEntries = [];
+        state.selectedWIEntries.clear();
+        updateWIEntryList();
+        return;
+    }
+
     $list.html('<div class="pf-wi-empty">재료를 수집하는 중...</div>');
 
     try {
-        let entries;
-        if (selected === '__char__') {
-            // 캐릭터 연결 WI
-            if (state.selectedCharIndex >= 0) {
-                entries = await loadCharacterWorldInfo(state.selectedCharIndex);
+        const allEntries = [];
+        const seenHashes = new Set();
+
+        for (const bookName of state.selectedWIBooks) {
+            let entries;
+            if (bookName === '__char__') {
+                if (state.selectedCharIndex >= 0) {
+                    entries = await loadCharacterWorldInfo(state.selectedCharIndex);
+                } else {
+                    entries = [];
+                }
             } else {
-                entries = [];
+                entries = await loadWorldInfoBookEntries(bookName);
             }
-        } else {
-            // 직접 선택한 WI 북
-            entries = await loadWorldInfoBookEntries(selected);
+
+            // 중복 제거하면서 머지
+            for (const entry of entries) {
+                const hash = simpleEntryHash(entry);
+                if (!seenHashes.has(hash)) {
+                    seenHashes.add(hash);
+                    allEntries.push(entry);
+                }
+            }
         }
 
-        state.loadedWIEntries = entries;
+        state.loadedWIEntries = allEntries;
+
+        // 기본적으로 모든 엔트리 선택
         state.selectedWIEntries.clear();
-        entries.forEach((_, idx) => {
+        allEntries.forEach((_, idx) => {
             state.selectedWIEntries.add(idx);
         });
+
         updateWIEntryList();
     } catch (error) {
-        logError('onWIBookSelect', error);
+        logError('loadAndMergeBooks', error);
         $list.html('<div class="pf-wi-empty">월드인포를 불러올 수 없습니다.</div>');
     }
 }
 
-async function loadAndDisplayWIEntries(charIndex) {
-    const $list = $('#pf-wi-entry-list');
-    const selectedBook = $('#pf-wi-book-select').val();
-
-    // 캐릭터 연결 모드일 때만 자동 로드
-    if (selectedBook && selectedBook !== '__char__') return;
-
-    $list.html('<div class="pf-wi-empty">재료를 수집하는 중...</div>');
-
-    try {
-        const entries = await loadCharacterWorldInfo(charIndex);
-        state.loadedWIEntries = entries;
-
-        // 기본적으로 모든 엔트리 선택
-        state.selectedWIEntries.clear();
-        entries.forEach((_, idx) => {
-            state.selectedWIEntries.add(idx);
-        });
-
-        updateWIEntryList();
-    } catch (error) {
-        logError('loadWI', error);
-        $list.html('<div class="pf-wi-empty">월드인포를 불러올 수 없습니다.</div>');
+/**
+ * 간단한 엔트리 해시 (머지 시 중복 제거용)
+ */
+function simpleEntryHash(entry) {
+    const raw = `${entry.comment || ''}|${(entry.keys || []).join(',')}|${(entry.content || '').substring(0, 200)}`;
+    let hash = 0;
+    for (let i = 0; i < raw.length; i++) {
+        const chr = raw.charCodeAt(i);
+        hash = ((hash << 5) - hash) + chr;
+        hash |= 0;
     }
+    return hash.toString(36);
 }
 
 function updateWIEntryList() {
@@ -519,6 +653,13 @@ function applyTheme(theme) {
     } else {
         $popup.removeClass('pf-light');
     }
+}
+
+// ===== 자동 저장 =====
+
+function onAutoSaveToggle() {
+    const enabled = $(this).prop('checked');
+    updateSetting('autoSaveHistory', enabled);
 }
 
 // ===== API 프로필 =====
@@ -646,20 +787,45 @@ async function onGenerateClick() {
 
     try {
         // UI 상태 전환
+        setCancelled(false);
         switchTab('generate');
         showGenerateLoading(true);
 
         const result = await generatePersona({ conceptText, sheetTemplate });
 
+        if (state.isCancelled) return;
+
         // 결과 렌더링
         renderGenerationResult(result);
         showToast('success', '페르소나가 생성되었습니다!');
 
+        // 히스토리 자동 저장
+        if (settings.autoSaveHistory && result) {
+            const autoName = `${result.charName || 'Unknown'} 페르소나`;
+            saveToHistory({
+                name: autoName,
+                charName: result.charName,
+                fullText: result.fullText,
+                language: result.language,
+                templateId: result.templateId,
+            });
+        }
+
     } catch (error) {
+        if (state.isCancelled || error.message === 'CANCELLED') return;
         logError('generate', error);
         showToast('error', `생성 실패: ${error.message}`);
         showGenerateLoading(false);
     }
+}
+
+/**
+ * 생성 취소 핸들러
+ */
+function onCancelGeneration() {
+    setCancelled(true);
+    showGenerateLoading(false);
+    showToast('info', '생성이 취소되었습니다.');
 }
 
 function startLoadingTextRotation() {
@@ -760,33 +926,41 @@ function renderSectionCards(sections) {
     const $container = $('#pf-sections-container');
     $container.empty();
 
-    // PROFILE_FIELDS 정의 순서대로 렌더 (일관된 순서 보장 + 보너스 섹션 표시)
-    for (const fieldId of Object.keys(PROFILE_FIELDS)) {
-        const section = sections[fieldId];
+    // 섹션 키를 순서대로 렌더 (section_0, section_1, ...)
+    const sortedKeys = Object.keys(sections).sort((a, b) => {
+        const numA = parseInt(a.replace('section_', ''), 10);
+        const numB = parseInt(b.replace('section_', ''), 10);
+        return numA - numB;
+    });
+
+    for (const sectionKey of sortedKeys) {
+        const section = sections[sectionKey];
         if (!section) continue;
 
-        const field = PROFILE_FIELDS[fieldId];
+        // 헤더에서 ## 제거하여 라벨 추출
+        const headerLabel = section.header.replace(/^#{1,3}\s+/, '').trim();
+        const icon = guessIconForHeader(headerLabel);
 
         const content = section.content || '';
-        // 헤더 부분을 제거하고 본문만 표시 (선행 빈줄/공백 확실히 제거)
+        // 헤더 부분을 제거하고 본문만 표시
         const displayContent = content.replace(/^#{1,3}\s+.+\n?/gm, '').trimStart().trim();
         const isEmpty = !displayContent;
 
         const bodyContent = isEmpty ? '(이 섹션은 비어있습니다. 재생성을 시도해주세요.)' : escapeHtml(displayContent);
 
         $container.append(`
-        <div class="pf-section-card" data-field="${fieldId}">
+        <div class="pf-section-card" data-section-key="${sectionKey}">
             <div class="pf-section-card-header">
-                <span class="pf-section-icon"><i class="${field.icon}"></i></span>
-                <span class="pf-section-label">${field.labelEn}</span>
-                <button class="pf-section-edit-btn" title="이 섹션 편집" data-field="${fieldId}"><i class="fa-solid fa-pen"></i></button>
-                <button class="pf-section-regen-btn" title="이 섹션 재생성" data-field="${fieldId}"><i class="fa-solid fa-arrows-rotate"></i></button>
+                <span class="pf-section-icon"><i class="${icon}"></i></span>
+                <span class="pf-section-label">${escapeHtml(headerLabel)}</span>
+                <button class="pf-section-edit-btn" title="이 섹션 편집" data-section-key="${sectionKey}"><i class="fa-solid fa-pen"></i></button>
+                <button class="pf-section-regen-btn" title="이 섹션 재생성" data-section-key="${sectionKey}"><i class="fa-solid fa-arrows-rotate"></i></button>
             </div>
             <div class="pf-section-card-body${isEmpty ? ' empty' : ''}">${bodyContent}</div>
             <div class="pf-section-regen-panel" style="display: none;">
                 <textarea placeholder="추가 지시사항 (선택사항)...&#10;예: 나머진 그대로 두고 키를 작게 변경해줘"></textarea>
                 <div class="pf-section-regen-actions">
-                    <button class="pf-section-regen-go pf-primary-btn pf-small-btn" data-field="${fieldId}">재생성</button>
+                    <button class="pf-section-regen-go pf-primary-btn pf-small-btn" data-section-key="${sectionKey}">재생성</button>
                     <button class="pf-section-regen-cancel pf-small-btn">취소</button>
                 </div>
             </div>
@@ -825,14 +999,18 @@ async function onModifyClick() {
     }
 
     try {
+        setCancelled(false);
         showGenerateLoading(true, '프로필을 모루 위에서 다듬는 중...');
         $('#pf-modify-panel').hide();
 
         const result = await modifyProfile(instructions);
+
+        if (state.isCancelled) return;
         renderGenerationResult(result);
         showToast('success', '프로필이 수정되었습니다!');
 
     } catch (error) {
+        if (state.isCancelled || error.message === 'CANCELLED') return;
         logError('modify', error);
         showToast('error', `수정 실패: ${error.message}`);
         showGenerateLoading(false);
@@ -858,31 +1036,42 @@ function onSectionRegenToggle() {
 async function onSectionRegenClick() {
     if (state.isGenerating) return;
 
-    const fieldId = $(this).data('field');
-    const $card = $(`.pf-section-card[data-field="${fieldId}"]`);
+    const sectionKey = $(this).data('section-key');
+    const $card = $(`.pf-section-card[data-section-key="${sectionKey}"]`);
     const instructions = $card.find('.pf-section-regen-panel textarea').val() || '';
 
     try {
+        setCancelled(false);
         $card.find('.pf-section-card-body').html('<div class="pf-loading" style="padding:10px"><div class="pf-spinner" style="width:24px;height:24px"></div></div>');
         $card.find('.pf-section-regen-panel').hide();
 
-        const result = await regenerateSection(fieldId, instructions);
+        const result = await regenerateSection(sectionKey, instructions);
+
+        if (state.isCancelled) return;
 
         // 해당 섹션만 업데이트
-        const section = result.sections[fieldId];
+        const section = result.sections[sectionKey];
         const displayContent = (section?.content || '').replace(/^#{1,3}\s+.+\n?/gm, '').trimStart().trim();
         $card.find('.pf-section-card-body')
             .removeClass('empty')
             .html(displayContent ? escapeHtml(displayContent) : '<em>(비어있음)</em>');
 
-        showToast('success', `${PROFILE_FIELDS[fieldId]?.label || fieldId} 섹션이 재생성되었습니다.`);
+        // 헤더 라벨도 업데이트 (재생성 시 헤더가 바뀌었을 수 있음)
+        const headerLabel = (section?.header || '').replace(/^#{1,3}\s+/, '').trim();
+        if (headerLabel) {
+            $card.find('.pf-section-label').text(headerLabel);
+            $card.find('.pf-section-icon i').attr('class', guessIconForHeader(headerLabel));
+        }
+
+        showToast('success', `"${headerLabel}" 섹션이 재생성되었습니다.`);
 
     } catch (error) {
+        if (state.isCancelled || error.message === 'CANCELLED') return;
         logError('regenSection', error);
         showToast('error', `재생성 실패: ${error.message}`);
         // 원래 내용 복원
-        if (state.currentGeneration?.sections[fieldId]) {
-            const content = state.currentGeneration.sections[fieldId].content.replace(/^#{1,3}\s+.+\n?/gm, '').trimStart().trim();
+        if (state.currentGeneration?.sections[sectionKey]) {
+            const content = state.currentGeneration.sections[sectionKey].content.replace(/^#{1,3}\s+.+\n?/gm, '').trimStart().trim();
             $card.find('.pf-section-card-body').html(escapeHtml(content));
         }
     }
@@ -891,8 +1080,8 @@ async function onSectionRegenClick() {
 // ===== 섹션 개별 편집 =====
 
 function onSectionEditToggle() {
-    const fieldId = $(this).data('field');
-    const $card = $(`.pf-section-card[data-field="${fieldId}"]`);
+    const sectionKey = $(this).data('section-key');
+    const $card = $(`.pf-section-card[data-section-key="${sectionKey}"]`);
     const $body = $card.find('.pf-section-card-body');
     const $existingEdit = $card.find('.pf-section-edit-panel');
 
@@ -906,7 +1095,7 @@ function onSectionEditToggle() {
         return;
     }
 
-    const section = state.currentGeneration?.sections[fieldId];
+    const section = state.currentGeneration?.sections[sectionKey];
     if (!section) return;
     const rawContent = (section.content || '').replace(/^#{1,3}\s+.+\n?/gm, '').trimStart().trim();
 
@@ -916,8 +1105,8 @@ function onSectionEditToggle() {
     <div class="pf-section-edit-panel">
         <textarea class="pf-section-edit-textarea pf-textarea">${escapeHtml(rawContent)}</textarea>
         <div class="pf-section-edit-actions">
-            <button class="pf-section-edit-save pf-primary-btn pf-small-btn" data-field="${fieldId}"><i class="fa-solid fa-check"></i> 저장</button>
-            <button class="pf-section-edit-cancel pf-btn pf-small-btn" data-field="${fieldId}">취소</button>
+            <button class="pf-section-edit-save pf-primary-btn pf-small-btn" data-section-key="${sectionKey}"><i class="fa-solid fa-check"></i> 저장</button>
+            <button class="pf-section-edit-cancel pf-btn pf-small-btn" data-section-key="${sectionKey}">취소</button>
         </div>
     </div>`;
 
@@ -925,19 +1114,24 @@ function onSectionEditToggle() {
 }
 
 function onSectionEditSave() {
-    const fieldId = $(this).data('field');
-    const $card = $(`.pf-section-card[data-field="${fieldId}"]`);
+    const sectionKey = $(this).data('section-key');
+    const $card = $(`.pf-section-card[data-section-key="${sectionKey}"]`);
     const newText = $card.find('.pf-section-edit-textarea').val().trim();
-    const field = PROFILE_FIELDS[fieldId];
 
-    if (state.currentGeneration?.sections[fieldId]) {
+    if (state.currentGeneration?.sections[sectionKey]) {
+        const section = state.currentGeneration.sections[sectionKey];
         // 헤더 포함하여 섹션 내용 업데이트
-        state.currentGeneration.sections[fieldId].content = `## ${field.labelEn}\n${newText}`;
+        section.content = `${section.header}\n${newText}`;
 
         // fullText 재조합
         const parts = [];
-        for (const fId of Object.keys(state.currentGeneration.sections)) {
-            const sec = state.currentGeneration.sections[fId];
+        const keys = Object.keys(state.currentGeneration.sections).sort((a, b) => {
+            const numA = parseInt(a.replace('section_', ''), 10);
+            const numB = parseInt(b.replace('section_', ''), 10);
+            return numA - numB;
+        });
+        for (const key of keys) {
+            const sec = state.currentGeneration.sections[key];
             if (sec?.content) parts.push(sec.content);
         }
         state.currentGeneration.fullText = parts.join('\n\n');
@@ -949,13 +1143,14 @@ function onSectionEditSave() {
             .toggleClass('empty', !newText)
             .show();
 
-        showToast('success', `${field?.label || fieldId} 섹션이 수정되었습니다.`);
+        const headerLabel = section.header.replace(/^#{1,3}\s+/, '').trim();
+        showToast('success', `"${headerLabel}" 섹션이 수정되었습니다.`);
     }
 }
 
 function onSectionEditCancel() {
-    const fieldId = $(this).data('field');
-    const $card = $(`.pf-section-card[data-field="${fieldId}"]`);
+    const sectionKey = $(this).data('section-key');
+    const $card = $(`.pf-section-card[data-section-key="${sectionKey}"]`);
     $card.find('.pf-section-edit-panel').remove();
     $card.find('.pf-section-card-body').show();
 }
@@ -968,14 +1163,18 @@ async function onRegenAllClick() {
     const instructions = $('#pf-regen-all-instructions').val() || '';
 
     try {
+        setCancelled(false);
         showGenerateLoading(true);
         $('#pf-regen-all-panel').hide();
 
         const result = await regenerateAll(instructions);
+
+        if (state.isCancelled) return;
         renderGenerationResult(result);
         showToast('success', '페르소나가 재생성되었습니다!');
 
     } catch (error) {
+        if (state.isCancelled || error.message === 'CANCELLED') return;
         logError('regenAll', error);
         showToast('error', `재생성 실패: ${error.message}`);
         showGenerateLoading(false);
@@ -1031,14 +1230,18 @@ async function onTranslateClick() {
     const targetLang = $('#pf-translate-lang').val();
 
     try {
+        setCancelled(false);
         showGenerateLoading(true, '다른 언어의 주형에 부어넣는 중...');
         $('#pf-translate-panel').hide();
 
         const result = await translateProfile(targetLang);
+
+        if (state.isCancelled) return;
         renderGenerationResult(result);
         showToast('success', `${LANGUAGES[targetLang]?.label || targetLang}로 번역되었습니다!`);
 
     } catch (error) {
+        if (state.isCancelled || error.message === 'CANCELLED') return;
         logError('translate', error);
         showToast('error', `번역 실패: ${error.message}`);
         showGenerateLoading(false);
@@ -1047,6 +1250,14 @@ async function onTranslateClick() {
 
 // ===== 저장/복사 =====
 
+/**
+ * 출력용 텍스트 생성 (최상단 헤더 자동 부착)
+ */
+function withProfileHeader(text) {
+    if (!text) return text;
+    return `# Character Profile\n\n${text}`;
+}
+
 function onCopyClick() {
     const text = state.currentGeneration?.fullText;
     if (!text) {
@@ -1054,7 +1265,7 @@ function onCopyClick() {
         return;
     }
 
-    copyToClipboard(text).then(success => {
+    copyToClipboard(withProfileHeader(text)).then(success => {
         if (success) {
             showToast('success', '클립보드에 복사되었습니다.');
         } else {
@@ -1064,11 +1275,12 @@ function onCopyClick() {
 }
 
 async function onApplyPersonaClick() {
-    const text = state.currentGeneration?.fullText;
-    if (!text) {
+    const rawText = state.currentGeneration?.fullText;
+    if (!rawText) {
         showToast('warning', '적용할 내용이 없습니다.');
         return;
     }
+    const text = withProfileHeader(rawText);
 
     // 이름 입력 받기
     const charName = state.currentGeneration?.charName || '';
@@ -1191,15 +1403,45 @@ function updateHistoryUI() {
         $list.hide();
         $controls.hide();
         $empty.show();
+        $empty.html(`
+            <div class="pf-empty-icon"><i class="fa-solid fa-clock-rotate-left"></i></div>
+            <p>저장된 히스토리가 없습니다.</p>
+        `);
+        return;
+    }
+
+    $controls.show();
+
+    // 검색/필터 적용
+    const searchTerm = ($('#pf-history-search').val() || '').toLowerCase().trim();
+    const filterLang = $('#pf-history-filter-lang').val() || '';
+    const filterTemplate = $('#pf-history-filter-template').val() || '';
+
+    const filtered = history.filter(item => {
+        if (searchTerm) {
+            const target = `${item.name || ''} ${item.charName || ''}`.toLowerCase();
+            if (!target.includes(searchTerm)) return false;
+        }
+        if (filterLang && item.language !== filterLang) return false;
+        if (filterTemplate && item.templateId !== filterTemplate) return false;
+        return true;
+    });
+
+    if (!filtered.length) {
+        $list.hide();
+        $empty.show();
+        $empty.html(`
+            <div class="pf-empty-icon"><i class="fa-solid fa-magnifying-glass"></i></div>
+            <p>검색 결과가 없습니다.</p>
+        `);
         return;
     }
 
     $empty.hide();
     $list.show();
-    $controls.show();
     $list.empty();
 
-    for (const item of history) {
+    for (const item of filtered) {
         const date = new Date(item.timestamp).toLocaleDateString('ko-KR', {
             year: 'numeric', month: 'short', day: 'numeric',
             hour: '2-digit', minute: '2-digit',
@@ -1221,6 +1463,10 @@ function updateHistoryUI() {
             </div>
         </div>`);
     }
+}
+
+function onHistoryFilterChange() {
+    updateHistoryUI();
 }
 
 function onHistoryLoad() {
@@ -1253,7 +1499,7 @@ function onHistoryCopy() {
     const item = history.find(h => h.id === id);
     if (!item) return;
 
-    copyToClipboard(item.fullText).then(success => {
+    copyToClipboard(withProfileHeader(item.fullText)).then(success => {
         showToast(success ? 'success' : 'error', success ? '클립보드에 복사되었습니다.' : '복사 실패');
     });
 }
@@ -1273,8 +1519,69 @@ function onHistoryClear() {
     showToast('success', '히스토리가 전체 삭제되었습니다.');
 }
 
+// ===== 히스토리 내보내기 / 가져오기 =====
+
+function onHistoryExport() {
+    const history = getHistory();
+    if (!history.length) {
+        showToast('warning', '내보낼 히스토리가 없습니다.');
+        return;
+    }
+
+    const json = JSON.stringify(history, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `persona-forge-history-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showToast('success', `${history.length}개 항목을 내보냈습니다.`);
+}
+
+function onHistoryImport() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json';
+    input.onchange = async (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        try {
+            const text = await file.text();
+            const imported = JSON.parse(text);
+            if (!Array.isArray(imported)) throw new Error('Invalid format');
+
+            const settings = getSettings();
+            if (!settings.history) settings.history = [];
+            const existingIds = new Set(settings.history.map(h => h.id));
+
+            let added = 0;
+            for (const item of imported) {
+                if (item.fullText && !existingIds.has(item.id)) {
+                    settings.history.push(item);
+                    existingIds.add(item.id);
+                    added++;
+                }
+            }
+
+            // 시간순 정렬 (최신 → 오래된)
+            settings.history.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+            saveSettingsDebounced();
+            updateHistoryUI();
+            showToast('success', `${added}개의 새 항목을 가져왔습니다.`);
+        } catch (err) {
+            logError('historyImport', err);
+            showToast('error', '가져오기 실패: 유효하지 않은 파일입니다.');
+        }
+    };
+    input.click();
+}
+
 /**
- * 히스토리 텍스트를 간단히 섹션으로 파싱
+ * 히스토리 텍스트를 간단히 섹션으로 파싱 (인덱스 기반)
  */
 function parseHistoryText(text) {
     const sections = {};
@@ -1287,7 +1594,7 @@ function parseHistoryText(text) {
     }
 
     if (matches.length === 0) {
-        sections['full'] = { header: '## PROFILE', content: text };
+        sections['section_0'] = { header: '## PROFILE', content: text };
         return sections;
     }
 
@@ -1295,8 +1602,7 @@ function parseHistoryText(text) {
         const start = matches[i].index;
         const end = (i + 1 < matches.length) ? matches[i + 1].index : text.length;
         const content = text.substring(start, end).trim();
-        const key = matches[i].title.toLowerCase().replace(/[^a-z]/g, '_').substring(0, 20);
-        sections[key] = { header: matches[i].fullMatch, content };
+        sections[`section_${i}`] = { header: matches[i].fullMatch, content };
     }
 
     return sections;
