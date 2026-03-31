@@ -188,8 +188,12 @@ export const defaultSettings = {
     // 테마
     theme: 'dark',
 
-    // 커스텀 필드 (template이 'custom'일 때)
+    // 커스텀 필드 (template이 'choice'일 때)
     customFields: [],
+
+    // 커스텀 필드 정의 오버라이드 (Choice 모드에서 필드 편집/추가 시)
+    // { fieldId: { label, labelEn, description, descriptionKo, icon, isCustom? } }
+    customFieldDefinitions: {},
 
     // 커스텀 시트 템플릿
     sheetTemplate: '',

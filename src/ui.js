@@ -245,6 +245,14 @@ export function bindUIEvents() {
     $(document).on('click', '#pf-prompt-preset-load', onPromptPresetLoad);
     $(document).on('click', '#pf-prompt-preset-delete', onPromptPresetDelete);
 
+    // === Choice 필드 커스터마이징 이벤트 ===
+    $(document).on('click', '#pf-custom-field-add', onCustomFieldAdd);
+    $(document).on('click', '#pf-custom-field-reset', onCustomFieldReset);
+    $(document).on('click', '.pf-field-edit-btn', onFieldEditToggle);
+    $(document).on('click', '.pf-field-delete-btn', onFieldDelete);
+    $(document).on('click', '.pf-field-edit-save', onFieldEditSave);
+    $(document).on('click', '.pf-field-edit-cancel', onFieldEditCancel);
+
     log('UI events bound');
 }
 
@@ -718,7 +726,7 @@ function updateTemplateDisplay() {
             : (preset?.fields || []);
 
         fields.forEach(fieldId => {
-            const field = PROFILE_FIELDS[fieldId];
+            const field = getEffectiveFieldUI(fieldId);
             if (!field) return;
             const nsfwClass = field.nsfw ? ' nsfw' : '';
             $tags.append(`<span class="pf-field-tag${nsfwClass}"><i class="${field.icon}"></i> ${field.label}</span>`);
@@ -731,22 +739,69 @@ function updateTemplateDisplay() {
     }
 }
 
+/**
+ * UI에서 필드 정의 조회 (커스텀 오버라이드 우선)
+ * @param {string} fieldId
+ * @returns {Object|null}
+ */
+function getEffectiveFieldUI(fieldId) {
+    const settings = getSettings();
+    const customDef = settings?.customFieldDefinitions?.[fieldId];
+    if (customDef) {
+        const base = PROFILE_FIELDS[fieldId] || {};
+        return { ...base, ...customDef, id: fieldId };
+    }
+    return PROFILE_FIELDS[fieldId] || null;
+}
+
+/**
+ * 모든 사용 가능한 필드 ID 목록 반환 (기본 + 커스텀)
+ * @returns {Array<string>}
+ */
+function getAllFieldIds() {
+    const settings = getSettings();
+    const baseIds = Object.keys(PROFILE_FIELDS);
+    const customIds = Object.keys(settings?.customFieldDefinitions || {})
+        .filter(id => id.startsWith('custom_'));
+    return [...baseIds, ...customIds];
+}
+
 function renderCustomFieldList() {
-    const customFields = getSettings()?.customFields || [];
+    const settings = getSettings();
+    const customFields = settings?.customFields || [];
+    const customDefs = settings?.customFieldDefinitions || {};
     const $list = $('#pf-custom-field-list');
     $list.empty();
 
-    for (const [fieldId, field] of Object.entries(PROFILE_FIELDS)) {
+    const allFieldIds = getAllFieldIds();
+
+    for (const fieldId of allFieldIds) {
+        const field = getEffectiveFieldUI(fieldId);
+        if (!field) continue;
+
         const checked = customFields.includes(fieldId) ? 'checked' : '';
         const nsfwClass = field.nsfw ? ' nsfw-field' : '';
+        const isCustom = fieldId.startsWith('custom_');
+        const isModified = !!customDefs[fieldId] && !isCustom;
+        const modifiedBadge = isModified ? '<span class="pf-field-modified-badge" title="수정됨">*</span>' : '';
 
         $list.append(`
-        <label class="pf-custom-field-item${nsfwClass}">
-            <input type="checkbox" class="pf-custom-field-cb" data-field="${fieldId}" ${checked}>
-            <span class="pf-field-icon"><i class="${field.icon}"></i></span>
-            <span class="pf-field-name">${field.label}</span>
-            <span class="pf-field-desc-text">${field.descriptionKo}</span>
-        </label>`);
+        <div class="pf-custom-field-item${nsfwClass}" data-field-id="${fieldId}">
+            <div class="pf-field-item-main">
+                <input type="checkbox" class="pf-custom-field-cb" data-field="${fieldId}" ${checked}>
+                <span class="pf-field-icon"><i class="${field.icon}"></i></span>
+                <span class="pf-field-name">${escapeHtml(field.label)}${modifiedBadge}</span>
+                <div class="pf-field-item-actions">
+                    <button class="pf-field-edit-btn pf-icon-btn-sm" data-field-id="${fieldId}" title="필드 편집">
+                        <i class="fa-solid fa-pen-to-square"></i>
+                    </button>
+                    ${isCustom ? `<button class="pf-field-delete-btn pf-icon-btn-sm pf-icon-btn-danger" data-field-id="${fieldId}" title="필드 삭제">
+                        <i class="fa-solid fa-trash-can"></i>
+                    </button>` : ''}
+                </div>
+            </div>
+            <span class="pf-field-desc-text">${escapeHtml(field.descriptionKo || field.description || '')}</span>
+        </div>`);
     }
 }
 
@@ -757,6 +812,183 @@ function onCustomFieldToggle() {
     });
     updateSetting('customFields', customFields);
     updateTemplateDisplay();
+}
+
+// ===== Choice 필드 커스터마이징 =====
+
+function onFieldEditToggle() {
+    const fieldId = $(this).data('field-id');
+    const $item = $(`.pf-custom-field-item[data-field-id="${fieldId}"]`);
+    const $existing = $item.find('.pf-field-edit-form');
+
+    // 토글 — 이미 편집 중이면 닫기
+    if ($existing.length) {
+        $existing.remove();
+        return;
+    }
+
+    // 다른 열린 편집 폼 닫기
+    $('.pf-field-edit-form').remove();
+
+    const field = getEffectiveFieldUI(fieldId);
+    if (!field) return;
+
+    const form = `
+    <div class="pf-field-edit-form">
+        <div class="pf-field-edit-row">
+            <label>한국어 이름</label>
+            <input type="text" class="pf-input pf-field-edit-label" value="${escapeHtml(field.label)}" placeholder="예: 기본 정보">
+        </div>
+        <div class="pf-field-edit-row">
+            <label>영문 헤더 <span class="pf-hint-inline">프롬프트에 ## 헤더로 사용</span></label>
+            <input type="text" class="pf-input pf-field-edit-labelEn" value="${escapeHtml(field.labelEn)}" placeholder="예: BASICS">
+        </div>
+        <div class="pf-field-edit-row">
+            <label>세부 설명 (EN) <span class="pf-hint-inline">프롬프트에 세부 지시로 사용</span></label>
+            <input type="text" class="pf-input pf-field-edit-desc" value="${escapeHtml(field.description)}" placeholder="예: Name, Age, Sex, Race">
+        </div>
+        <div class="pf-field-edit-row">
+            <label>세부 설명 (KO) <span class="pf-hint-inline">UI 표시용</span></label>
+            <input type="text" class="pf-input pf-field-edit-descKo" value="${escapeHtml(field.descriptionKo || '')}" placeholder="예: 이름, 나이, 성별, 종족">
+        </div>
+        <div class="pf-field-edit-form-actions">
+            <button class="pf-field-edit-save pf-primary-btn pf-small-btn" data-field-id="${fieldId}"><i class="fa-solid fa-check"></i> 저장</button>
+            <button class="pf-field-edit-cancel pf-btn pf-small-btn" data-field-id="${fieldId}">취소</button>
+        </div>
+    </div>`;
+
+    $item.append(form);
+}
+
+function onFieldEditSave() {
+    const fieldId = $(this).data('field-id');
+    const $item = $(`.pf-custom-field-item[data-field-id="${fieldId}"]`);
+    const $form = $item.find('.pf-field-edit-form');
+
+    const label = $form.find('.pf-field-edit-label').val().trim();
+    const labelEn = $form.find('.pf-field-edit-labelEn').val().trim();
+    const description = $form.find('.pf-field-edit-desc').val().trim();
+    const descriptionKo = $form.find('.pf-field-edit-descKo').val().trim();
+
+    if (!label || !labelEn || !description) {
+        showToast('warning', '한국어 이름, 영문 헤더, 세부 설명(EN)은 필수입니다.');
+        return;
+    }
+
+    const settings = getSettings();
+    if (!settings.customFieldDefinitions) settings.customFieldDefinitions = {};
+
+    // 기존 아이콘 유지 (새 필드는 이미 추가 시 fa-solid fa-star로 설정됨)
+    const existingIcon = getEffectiveFieldUI(fieldId)?.icon || 'fa-solid fa-star';
+
+    settings.customFieldDefinitions[fieldId] = {
+        label,
+        labelEn,
+        description,
+        descriptionKo: descriptionKo || label,
+        icon: existingIcon,
+    };
+
+    // 커스텀 필드의 경우 isCustom 플래그 유지
+    if (fieldId.startsWith('custom_')) {
+        settings.customFieldDefinitions[fieldId].isCustom = true;
+    }
+
+    updateSetting('customFieldDefinitions', settings.customFieldDefinitions);
+    renderCustomFieldList();
+    updateTemplateDisplay();
+    showToast('success', `필드 "${label}" 이(가) 저장되었습니다.`);
+}
+
+function onFieldEditCancel() {
+    const fieldId = $(this).data('field-id');
+    $(`.pf-custom-field-item[data-field-id="${fieldId}"] .pf-field-edit-form`).remove();
+}
+
+function onCustomFieldAdd() {
+    const settings = getSettings();
+    if (!settings.customFieldDefinitions) settings.customFieldDefinitions = {};
+    if (!settings.customFields) settings.customFields = [];
+
+    const id = 'custom_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 4);
+
+    settings.customFieldDefinitions[id] = {
+        label: '새 필드',
+        labelEn: 'NEW FIELD',
+        description: 'Describe what this field should contain',
+        descriptionKo: '새 필드 설명',
+        icon: 'fa-solid fa-star',
+        isCustom: true,
+    };
+
+    // 자동으로 선택 상태로 추가
+    settings.customFields.push(id);
+
+    updateSetting('customFieldDefinitions', settings.customFieldDefinitions);
+    updateSetting('customFields', settings.customFields);
+    renderCustomFieldList();
+    updateTemplateDisplay();
+
+    // 새로 추가된 필드의 편집 폼 자동 오픈
+    setTimeout(() => {
+        const $newItem = $(`.pf-custom-field-item[data-field-id="${id}"]`);
+        $newItem.find('.pf-field-edit-btn').trigger('click');
+        // 스크롤하여 보이도록
+        $newItem[0]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 50);
+
+    showToast('info', '새 필드가 추가되었습니다. 내용을 편집해주세요.');
+}
+
+function onFieldDelete() {
+    const fieldId = $(this).data('field-id');
+    if (!fieldId.startsWith('custom_')) return;
+
+    const field = getEffectiveFieldUI(fieldId);
+    const name = field?.label || fieldId;
+
+    if (!confirm(`"필드 "${name}"을(를) 삭제하시겠습니까?`)) return;
+
+    const settings = getSettings();
+
+    // 정의에서 제거
+    if (settings.customFieldDefinitions) {
+        delete settings.customFieldDefinitions[fieldId];
+        updateSetting('customFieldDefinitions', settings.customFieldDefinitions);
+    }
+
+    // 선택 목록에서 제거
+    if (settings.customFields) {
+        settings.customFields = settings.customFields.filter(id => id !== fieldId);
+        updateSetting('customFields', settings.customFields);
+    }
+
+    renderCustomFieldList();
+    updateTemplateDisplay();
+    showToast('success', `필드 "${name}"이(가) 삭제되었습니다.`);
+}
+
+function onCustomFieldReset() {
+    const settings = getSettings();
+    const hasCustom = settings.customFieldDefinitions && Object.keys(settings.customFieldDefinitions).length > 0;
+
+    if (!hasCustom) {
+        showToast('info', '초기화할 커스텀 수정 사항이 없습니다.');
+        return;
+    }
+
+    if (!confirm('모든 필드 커스터마이징(편집/추가)을 초기화하시겠습니까?\n기본 필드는 원래대로 복원되고, 커스텀 필드는 삭제됩니다.')) return;
+
+    // 커스텀 필드 ID들을 customFields에서도 제거
+    if (settings.customFields) {
+        settings.customFields = settings.customFields.filter(id => !id.startsWith('custom_'));
+        updateSetting('customFields', settings.customFields);
+    }
+
+    updateSetting('customFieldDefinitions', {});
+    renderCustomFieldList();
+    updateTemplateDisplay();
+    showToast('success', '필드 커스터마이징이 초기화되었습니다.');
 }
 
 // ===== 생성 =====

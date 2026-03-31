@@ -154,6 +154,22 @@ function getActiveFields() {
 }
 
 /**
+ * 필드 정의를 반환 (커스텀 오버라이드 우선, 없으면 기본 PROFILE_FIELDS)
+ * @param {string} fieldId
+ * @returns {Object|null}
+ */
+function getEffectiveField(fieldId) {
+    const settings = getSettings();
+    const customDef = settings?.customFieldDefinitions?.[fieldId];
+    if (customDef) {
+        // 커스텀 정의와 기본 정의를 머지 (커스텀이 우선)
+        const base = PROFILE_FIELDS[fieldId] || {};
+        return { ...base, ...customDef, id: fieldId };
+    }
+    return PROFILE_FIELDS[fieldId] || null;
+}
+
+/**
  * 필드 목록을 프롬프트 지시문으로 변환
  * @param {Array<string>} fields
  * @param {string} language
@@ -161,7 +177,7 @@ function getActiveFields() {
  */
 function formatFieldInstructions(fields, language) {
     return fields.map((fieldId, idx) => {
-        const field = PROFILE_FIELDS[fieldId];
+        const field = getEffectiveField(fieldId);
         if (!field) return '';
         return `${idx + 1}. ## ${field.labelEn} — ${field.description}`;
     }).filter(Boolean).join('\n');
